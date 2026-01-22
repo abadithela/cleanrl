@@ -44,6 +44,8 @@ class Args:
     """the number of parallel game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
+    num_trials: int = 1000
+    """the number of trials to run the policy after training"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.99
@@ -76,6 +78,7 @@ class Args:
     """the mini-batch size (computed in runtime)"""
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
+
 
 def make_env(env_id, idx, capture_video, run_name):
     def thunk():
@@ -124,6 +127,12 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(x)
 
+    def get_action(self, x, deterministic=False):
+        logits = self.actor(x)
+        probs = Categorical(logits=logits)
+        if deterministic:
+            return torch.argmax(probs.probs, dim=-1)
+        return probs.sample()
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
@@ -173,7 +182,7 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
-    
+
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
@@ -306,6 +315,47 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+
+    #######################################################33
+    # Evaluating policy runs:
+    # ALGO Logic: Storage setup
+    completed_trials_rewards = []
+    episode_returns = np.zeros(args.num_envs, dtype=np.float64)
+
+    eval_envs = gym.vector.SyncVectorEnv(
+        [make_env(args.env_id, 1000 + i, False, run_name)
+        for i in range(args.num_envs)]
+    )
+
+    # TRY NOT TO MODIFY: start the game
+    start_time = time.time()
+    next_obs, _ = eval_envs.reset()
+    next_obs = torch.Tensor(next_obs).to(device)
+    next_done = torch.zeros(args.num_envs).to(device)
+
+    while len(completed_trials_rewards) < args.num_trials:
+        with torch.no_grad():
+            action = agent.get_action(next_obs, deterministic=True)
+        # TRY NOT TO MODIFY: execute the game and log data.
+        next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+        next_done = np.logical_or(terminations, truncations)
+        episode_returns += reward
+        next_obs = torch.Tensor(next_obs).to(device)
+
+        if "final_info" in infos:
+            for i, info in enumerate(infos["final_info"]):
+                if info and "episode" in info:
+                    print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+                    writer.add_scalar("charts/eval_episode_reward", info["episode"]["r"], global_step)
+                    writer.add_scalar("charts/eval_episode_length", info["episode"]["l"], global_step)
+                    completed_trials_rewards.append(info["episode"]["r"])
+                    episode_returns[i] = 0.0
+
+    # Save episode rewards
+    np.save(
+        os.path.join("runs", run_name, f"completed_trials_rewards_steps{args.total_timesteps}.npy"),
+        np.array(completed_trials_rewards),
+    )
 
     envs.close()
     writer.close()

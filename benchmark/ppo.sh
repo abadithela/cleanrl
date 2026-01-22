@@ -134,6 +134,7 @@ xvfb-run -a uv run python -m cleanrl_utils.benchmark \
     --slurm-ntasks 1 \
     --slurm-total-cpus 10 \
     --slurm-template-path benchmark/cleanrl_1gpu.slurm_template
+    
 xvfb-run -a uv run python -m cleanrl_utils.benchmark \
     --env-ids AllegroHand ShadowHand \
     --command "uv run python cleanrl/ppo_continuous_action_isaacgym/ppo_continuous_action_isaacgym.py --track --capture_video --num-envs 8192 --num-steps 8 --update-epochs 5 --num-minibatches 4 --reward-scaler 0.01 --total-timesteps 600000000 --record-video-step-frequency 3660" \
