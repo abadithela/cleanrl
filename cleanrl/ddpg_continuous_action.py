@@ -245,7 +245,7 @@ if __name__ == "__main__":
             model_path,
             make_env,
             args.env_id,
-            eval_episodes=10,
+            eval_episodes=1000,
             run_name=f"{run_name}-eval",
             Model=(Actor, QNetwork),
             device=device,
@@ -253,6 +253,8 @@ if __name__ == "__main__":
         )
         for idx, episodic_return in enumerate(episodic_returns):
             writer.add_scalar("eval/episodic_return", episodic_return, idx)
+
+        np.save(f"runs/{run_name}/episodic_returns.npy", episodic_returns)
 
         if args.upload_model:
             from cleanrl_utils.huggingface import push_to_hub

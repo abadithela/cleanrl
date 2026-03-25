@@ -41,6 +41,9 @@ class Args:
     total_timesteps: int = 1000000
     """total timesteps of the experiments"""
     num_envs: int = 1
+    """whether or not to evaluate the agent at the end"""
+    evaluate: bool = False
+    eval_episodes: int = 1000
     """the number of parallel game environments"""
     buffer_size: int = int(1e6)
     """the replay memory buffer size"""
@@ -319,6 +322,32 @@ if __name__ == "__main__":
                 )
                 if args.autotune:
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+
+    if args.evaluate:
+        eval_envs = gym.vector.SyncVectorEnv(
+            [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
+        )
+        eval_envs.single_observation_space.dtype = np.float32
+        obs, _ = eval_envs.reset(seed=args.seed)
+        episodic_returns = []
+        actor.eval()
+
+        while len(episodic_returns) < args.eval_episodes:
+            # ALGO LOGIC: put action logic here
+            actions, _, _ = actor.get_action(torch.Tensor(obs).to(device))
+            actions = actions.detach().cpu().numpy()
+
+            # TRY NOT TO MODIFY: execute the game and log data.
+            obs, _,_,_, infos = eval_envs.step(actions)
+            # TRY NOT TO MODIFY: record rewards for plotting purposes
+            if "final_info" in infos:
+                for info in infos["final_info"]:
+                    if "episode" not in info:
+                        continue
+                    print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
+                    episodic_returns += [info["episode"]["r"]]
+        # Save episode rewards
+        np.save(f"runs/{run_name}/episodic_returns.npy", episodic_returns)
 
     envs.close()
     writer.close()

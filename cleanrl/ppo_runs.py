@@ -356,6 +356,5 @@ if __name__ == "__main__":
         os.path.join("runs", run_name, f"completed_trials_rewards_steps{args.total_timesteps}.npy"),
         np.array(completed_trials_rewards),
     )
-
     envs.close()
     writer.close()

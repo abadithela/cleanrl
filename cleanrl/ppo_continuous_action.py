@@ -33,6 +33,10 @@ class Args:
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_model: bool = False
+    """whether to run evals"""
+    run_evals: bool = False
+    """Number of evaluation episodes to run"""
+    eval_episodes: int = 1000
     """whether to save model into the `runs/{run_name}` folder"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
@@ -83,8 +87,7 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
-
-def make_env(env_id, idx, capture_video, run_name, gamma):
+def make_env(env_id, idx, capture_video, run_name, gamma, eval_mode=False):
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -96,18 +99,16 @@ def make_env(env_id, idx, capture_video, run_name, gamma):
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        if not eval_mode:
+            env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         return env
-
     return thunk
-
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
-
 
 class Agent(nn.Module):
     def __init__(self, envs):
@@ -323,6 +324,17 @@ if __name__ == "__main__":
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+    base_env = envs.envs[0]
+    rew_norm = None
+    while hasattr(base_env, "env"):
+        if isinstance(base_env, gym.wrappers.NormalizeReward):
+            rew_norm = base_env
+            break
+        base_env = base_env.env
+
+    print("training return_rms mean:", rew_norm.return_rms.mean)
+    print("training return_rms var:", rew_norm.return_rms.var)
+
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(agent.state_dict(), model_path)
@@ -344,10 +356,45 @@ if __name__ == "__main__":
 
         if args.upload_model:
             from cleanrl_utils.huggingface import push_to_hub
-
             repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
             repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
             push_to_hub(args, episodic_returns, repo_id, "PPO", f"runs/{run_name}", f"videos/{run_name}-eval")
+
+    if args.run_evals:
+        # Evaluating on RAW Mujoco Rewards
+        eval_envs = gym.vector.SyncVectorEnv(
+            [make_env(args.env_id, 0, args.capture_video, run_name, gamma=args.gamma, eval_mode=True)]
+        )
+        agent.eval()
+
+        eval_envs.envs[0].env.env.env.obs_rms = envs.envs[0].env.env.env.obs_rms
+        eval_envs.envs[0].return_rms = envs.envs[0].return_rms
+
+        obs, _ = eval_envs.reset()
+        episodic_returns = []
+        while len(episodic_returns) < args.eval_episodes:
+            actions, _, _, _ = agent.get_action_and_value(torch.Tensor(obs).to(device))
+            next_obs, _, _, _, infos = envs.step(actions.cpu().numpy())
+            if "final_info" in infos:
+                for info in infos["final_info"]:
+                    if "episode" not in info:
+                        continue
+                    print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
+                    episodic_returns += [info["episode"]["r"]]
+            obs = next_obs
+        # Save to file: 
+        np.save(f"runs/{run_name}/episodic_returns.npy", episodic_returns)
+
+        base_env = eval_envs.envs[0]
+        rew_norm = None
+        while hasattr(base_env, "env"):
+            if isinstance(base_env, gym.wrappers.NormalizeReward):
+                rew_norm = base_env
+                break
+            base_env = base_env.env
+
+        print("return_rms mean:", rew_norm.return_rms.mean)
+        print("return_rms var:", rew_norm.return_rms.var)
 
     envs.close()
     writer.close()

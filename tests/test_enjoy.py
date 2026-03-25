@@ -3,7 +3,7 @@ import subprocess
 
 def test_dqn():
     subprocess.run(
-        "python enjoy.py --exp-name dqn --env CartPole-v1 --eval-episodes 1",
+        "python cleanrl_utils/enjoy.py --exp-name dqn --env CartPole-v1 --eval-episodes 1",
         shell=True,
         check=True,
     )
