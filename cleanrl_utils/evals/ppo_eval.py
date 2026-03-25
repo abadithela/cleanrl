@@ -32,7 +32,6 @@ def evaluate(
                 print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
                 episodic_returns += [info["episode"]["r"]]
         obs = next_obs
-
     return episodic_returns
 
 
@@ -41,16 +40,20 @@ if __name__ == "__main__":
 
     from cleanrl.ppo_continuous_action import Agent, make_env
 
-    model_path = hf_hub_download(
-        repo_id="sdpkjc/Hopper-v4-ppo_continuous_action-seed1", filename="ppo_continuous_action.cleanrl_model"
-    )
-    evaluate(
+    # model_path = hf_hub_download(
+    #     repo_id="sdpkjc/Hopper-v4-ppo_continuous_action-seed1", filename="ppo_continuous_action.cleanrl_model"
+    # )
+
+    model_path = "/n/fs/irom-testing/sbt/cleanrl/runs/Hopper-v4__ppo_continuous_action__1__1769185813/ppo_continuous_action.cleanrl_model"
+    
+    episodic_returns = evaluate(
         model_path,
         make_env,
         "Hopper-v4",
         eval_episodes=10,
         run_name=f"eval",
         Model=Agent,
-        device="cpu",
+        device="cuda" if torch.cuda.is_available() else "cpu",
         capture_video=False,
     )
+    breakpoint()
